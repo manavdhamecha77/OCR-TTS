@@ -1,0 +1,8 @@
+flask
+flask-cors
+easyocr
+edge-tts
+pytesseract
+Pillow
+requests
+base64
