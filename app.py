@@ -50,18 +50,12 @@ LANGUAGE_CONFIG = {
         "tts_engine": "edge",
         "tts_voice": "gu-IN-DhwaniNeural",
     },
-    "od": {
+        "od": {
         "name": "Odia",
         "ocr_engine": "tesseract",
         "tesseract_lang": "ori",
-        "tts_engine": "parler",
-        # Voice is controlled via a plain-English description — no fixed names.
-        # Change gender / pace / style freely here.
-        "parler_description": (
-            "Aditi speaks clearly at a moderate pace, "
-            "very close recording, no background noise."
-        ),
-    },
+        "tts_engine": "sarvam",
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -297,15 +291,51 @@ def run_tts(text: str, lang_code: str, output_path: str) -> str:
         run_tts_edge(text, config["tts_voice"], output_path)
         return output_path
 
-    elif engine == "parler":
-        wav_path = output_path.replace(".mp3", ".wav")
-        run_tts_parler(text, config["parler_description"], wav_path)
-        return wav_path
+    elif engine == "sarvam":
+        run_tts_sarvam(text, output_path)
+        return output_path
 
     else:
         raise ValueError(f"Unknown TTS engine: {engine}")
 
 
+
+def run_tts_sarvam(text: str, output_path: str):
+    import requests
+
+    API_KEY = "sk_p3dt0cqs_nD0eQZIvYimzMA0yoAJecLbN"
+
+    url = "https://api.sarvam.ai/text-to-speech"
+
+    payload = {
+        "inputs": [text],
+        "target_language_code": "od-IN",  # Odia
+        "speaker": "anushka",  # try other voices if available
+        "pitch": 0,
+        "pace": 1.0,
+        "loudness": 1.0,
+        "speech_sample_rate": 22050,
+        "enable_preprocessing": True
+    }
+
+    headers = {
+        "api-subscription-key": API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+
+    if response.status_code != 200:
+        raise Exception(f"Sarvam TTS failed: {response.text}")
+
+    data = response.json()
+
+    import base64
+    audio_base64 = data["audios"][0]
+    audio_bytes = base64.b64decode(audio_base64)
+
+    with open(output_path, "wb") as f:
+        f.write(audio_bytes)
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
