@@ -1,10 +1,8 @@
 import os
 import uuid
 import asyncio
-import base64
 import tempfile
 
-import requests
 from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
 import easyocr
@@ -50,21 +48,20 @@ LANGUAGE_CONFIG = {
         "tts_engine": "edge",
         "tts_voice": "gu-IN-DhwaniNeural",
     },
-        "od": {
+    "od": {
         "name": "Odia",
         "ocr_engine": "tesseract",
         "tesseract_lang": "ori",
-        "tts_engine": "sarvam",
-    }
+        "tts_engine": "mms",
+        "mms_model_id": "facebook/mms-tts-ory",
+    },
 }
 
 # ---------------------------------------------------------------------------
 # Lazy-loaded caches — nothing heavy is loaded until the first request needs it
 # ---------------------------------------------------------------------------
 _easyocr_readers: dict = {}
-_parler_model = None
-_parler_tokenizer = None
-_parler_desc_tokenizer = None
+_mms_models: dict = {}  # keyed by model_id
 
 
 # ---------------------------------------------------------------------------
@@ -202,77 +199,43 @@ def run_tts_edge(text: str, voice: str, output_path: str):
 
 
 # ---------------------------------------------------------------------------
-# TTS — Parler TTS  (Odia)
+# TTS — Facebook MMS-TTS  (Odia)
 # ---------------------------------------------------------------------------
 
-def get_parler_model():
-    """Lazy-load ai4bharat/indic-parler-tts once and keep it in memory."""
-    global _parler_model, _parler_tokenizer, _parler_desc_tokenizer
-    if _parler_model is None:
-        # Install once:
-        #   pip install git+https://github.com/huggingface/parler-tts.git
-        #   pip install transformers torch soundfile
-        from parler_tts import ParlerTTSForConditionalGeneration
-        from transformers import AutoTokenizer
-
-        MODEL_ID = "ai4bharat/indic-parler-tts"
-        _parler_model = ParlerTTSForConditionalGeneration.from_pretrained(MODEL_ID)
-        _parler_tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-        _parler_desc_tokenizer = AutoTokenizer.from_pretrained(
-            _parler_model.config.text_encoder._name_or_path
-        )
-    return _parler_model, _parler_tokenizer, _parler_desc_tokenizer
+def get_mms_model(model_id: str):
+    """Lazy-load a MMS-TTS model once and cache it by model_id."""
+    if model_id not in _mms_models:
+        from transformers import VitsModel, AutoTokenizer
+        import torch
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        model = VitsModel.from_pretrained(model_id, torch_dtype=torch.float32)
+        model.eval()
+        _mms_models[model_id] = (model, tokenizer)
+    return _mms_models[model_id]
 
 
-def _synthesise_parler_chunk(text: str, description: str, output_wav: str):
-    """Synthesise one text chunk and write to output_wav."""
+def run_tts_mms(text: str, model_id: str, output_path: str):
+    """
+    Synthesise text with Facebook MMS-TTS and save as WAV.
+    Chunks long text and concatenates audio so there is no length limit.
+    Output path should end in .wav.
+    """
     import torch
-    import soundfile as sf
-
-    model, tokenizer, desc_tokenizer = get_parler_model()
-    desc_ids = desc_tokenizer(description, return_tensors="pt")
-    prompt_ids = tokenizer(text, return_tensors="pt")
-
-    with torch.no_grad():
-        generation = model.generate(
-            input_ids=desc_ids.input_ids,
-            attention_mask=desc_ids.attention_mask,
-            prompt_input_ids=prompt_ids.input_ids,
-            prompt_attention_mask=prompt_ids.attention_mask,
-        )
-
-    audio = generation.cpu().numpy().squeeze()
-    sf.write(output_wav, audio, model.config.sampling_rate)
-
-
-def run_tts_parler(text: str, description: str, output_path: str):
-    """
-    Split text into chunks → synthesise each → concatenate into one WAV.
-    Output path must end in .wav (Parler is WAV-native; no MP3 conversion
-    needed — the /audio route serves it as audio/wav automatically).
-    """
     import numpy as np
     import soundfile as sf
 
-    model, _, _ = get_parler_model()
+    model, tokenizer = get_mms_model(model_id)
     chunks = chunk_text(text, PARLER_TTS_CHUNK)
-
     all_audio = []
-    tmp_files = []
 
     for chunk in chunks:
-        tmp_wav = os.path.join(UPLOAD_FOLDER, f"parler_{uuid.uuid4()}.wav")
-        tmp_files.append(tmp_wav)
-        _synthesise_parler_chunk(chunk, description, tmp_wav)
-        audio_data, _ = sf.read(tmp_wav)
-        all_audio.append(audio_data)
+        inputs = tokenizer(chunk, return_tensors="pt")
+        with torch.no_grad():
+            waveform = model(**inputs).waveform[0].cpu().numpy()
+        all_audio.append(waveform)
 
     combined = np.concatenate(all_audio)
     sf.write(output_path, combined, model.config.sampling_rate)
-
-    for f in tmp_files:
-        if os.path.exists(f):
-            os.remove(f)
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +245,7 @@ def run_tts_parler(text: str, description: str, output_path: str):
 def run_tts(text: str, lang_code: str, output_path: str) -> str:
     """
     Dispatch to the correct TTS engine.
-    Returns the actual saved file path (extension may differ for Parler WAV).
+    Returns the actual saved file path (extension may differ for WAV output).
     """
     config = LANGUAGE_CONFIG[lang_code]
     engine = config["tts_engine"]
@@ -291,51 +254,13 @@ def run_tts(text: str, lang_code: str, output_path: str) -> str:
         run_tts_edge(text, config["tts_voice"], output_path)
         return output_path
 
-    elif engine == "sarvam":
-        run_tts_sarvam(text, output_path)
-        return output_path
+    elif engine == "mms":
+        wav_path = output_path.replace(".mp3", ".wav")
+        run_tts_mms(text, config["mms_model_id"], wav_path)
+        return wav_path
 
     else:
         raise ValueError(f"Unknown TTS engine: {engine}")
-
-
-
-def run_tts_sarvam(text: str, output_path: str):
-    import requests
-
-    API_KEY = "sk_p3dt0cqs_nD0eQZIvYimzMA0yoAJecLbN"
-
-    url = "https://api.sarvam.ai/text-to-speech"
-
-    payload = {
-        "inputs": [text],
-        "target_language_code": "od-IN",  # Odia
-        "speaker": "anushka",  # try other voices if available
-        "pitch": 0,
-        "pace": 1.0,
-        "loudness": 1.0,
-        "speech_sample_rate": 22050,
-        "enable_preprocessing": True
-    }
-
-    headers = {
-        "api-subscription-key": API_KEY,
-        "Content-Type": "application/json"
-    }
-
-    response = requests.post(url, json=payload, headers=headers)
-
-    if response.status_code != 200:
-        raise Exception(f"Sarvam TTS failed: {response.text}")
-
-    data = response.json()
-
-    import base64
-    audio_base64 = data["audios"][0]
-    audio_bytes = base64.b64decode(audio_base64)
-
-    with open(output_path, "wb") as f:
-        f.write(audio_bytes)
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
