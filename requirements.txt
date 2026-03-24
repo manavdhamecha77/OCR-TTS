@@ -1,26 +1,24 @@
-# Core
+# --- Web Server ---
 flask==3.0.3
 flask-cors==4.0.1
 requests==2.32.3
 
-# OCR
+# --- OCR Engines & Image Processing ---
 easyocr==1.7.1
 pytesseract==0.3.10
 Pillow==10.3.0
 
-# PDF
+# --- PDF Handling ---
 pypdf==4.2.0
 pdf2image==1.17.0
 
-# TTS
+# --- Text-to-Speech  ---
 edge-tts==6.1.12
+soundfile==0.12.1
 
-# ML (STRICT versions — DO NOT CHANGE)
+# --- Machine Learning  ---
 torch==2.2.2
 torchvision==0.17.2
 torchaudio==2.2.2
 numpy==1.26.4
-
-# HuggingFace
 transformers==4.41.2
-soundfile==0.12.1
