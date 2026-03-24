@@ -1,114 +1,142 @@
 
-# Audio Pipeline
+# Multilingual Document-to-Speech System
 
-A simple end-to-end pipeline to convert image-based documents into spoken audio using OCR and text-to-speech (TTS). Supports English, Hindi, Gujarati, and Odia.
+A robust, AI-powered Flask API designed to bridge the gap between visual documents and auditory accessibility. This system converts images and complex PDFs into high-fidelity speech across multiple languages, including English, Hindi, Gujarati, and Odia.
 
-This project runs as a Flask web app with a clean browser UI.
-
----
-
-## Pipeline Overview
-
-```
-Document / Image
-       |
-       v
-OCR (EasyOCR or Tesseract)
-       |
-       v
-TTS (Edge TTS or Sarvam AI)
-       |
-       v
-Audio Output (MP3)
-```
-
-### Steps Explained
-
-- **OCR** — Extracts text from uploaded images.
-
-  - **EasyOCR** is used for English and Hindi.
-  - **Tesseract** is used for Gujarati (`guj`) and Odia (`ori`).
-- **Text-to-Speech (TTS)** — Converts extracted text into natural-sounding speech.
-
-  - **Edge TTS** (Microsoft) is used for English, Hindi, and Gujarati.
-  - **Sarvam AI Bulbul v3** is used for Odia, since Edge TTS has no Odia voice.
+By utilizing a hybrid pipeline of **OCR (Optical Character Recognition)** and **Neural TTS (Text-to-Speech)**, the application ensures that even scanned, non-searchable documents become accessible to everyone.
 
 ---
 
-## Supported Languages
 
-| Language | Script     | OCR Engine | TTS Engine            |
-| -------- | ---------- | ---------- | --------------------- |
-| English  | Latin      | EasyOCR    | Edge TTS              |
-| Hindi    | Devanagari | EasyOCR    | Edge TTS              |
-| Gujarati | Gujarati   | Tesseract  | Edge TTS              |
-| Odia     | Odia       | Tesseract  | Sarvam AI (Bulbul v3) |
+
+## Key Features
+
+* **Hybrid OCR Engine**: Uses **EasyOCR** (neural-based) for English and Hindi, and **Tesseract OCR** for specialized scripts like Gujarati and Odia.
+* **Intelligent PDF Processing**:
+  * **Direct Extraction**: First, it pulls the native text layer from digital PDFs for 100% accuracy.
+  * **OCR Fallback**: If a page is a scan or an image, the system automatically rasterizes it and runs OCR.
+* **Multi-Engine Speech (TTS)**:
+  * **Edge TTS**: High-fidelity cloud-based neural voices for English, Hindi, and Gujarati.
+  * **Meta MMS**: Uses Facebook’s Massively Multilingual Speech models for Odia, ensuring support for low-resource languages.
+* **Smart Text Chunking**: An algorithm that splits long text at sentence boundaries (using `।`, `.`, `!`, or `?`) to prevent memory crashes and ensure smooth audio flow.
+* **Lazy Loading**: Heavy AI models are only loaded into RAM when a specific language request triggers them, keeping the initial footprint light.
 
 ---
 
-## Getting Started
 
-### 1. Install Dependencies
+
+## Tech Stack & System Requirements
+
+### Software Frameworks
+
+| Component                  | Technology                                                       |
+| :------------------------- | :--------------------------------------------------------------- |
+| **Backend**          | Python 3.10+, Flask, Flask-CORS                                  |
+| **OCR Engines**      | EasyOCR (Neural), Tesseract OCR                                  |
+| **PDF Handling**     | `pypdf` (Native), `pdf2image` (Rasterization)                |
+| **Speech (TTS)**     | `edge-tts` (Microsoft Neural), `transformers` (Meta MMS-TTS) |
+| **Audio Processing** | NumPy, PyTorch, SoundFile                                        |
+
+### External System Dependencies
+
+To ensure the OCR and PDF conversion functions correctly, the following must be installed on your operating system:
+
+1. **Tesseract OCR**: Required for Gujarati and Odia extraction.
+   * *Linux*: `sudo apt install tesseract-ocr`
+   * *Mac*: `brew install tesseract`
+2. **Poppler (poppler-utils)**: Required to convert PDF pages into images for OCR.
+   * *Linux*: `sudo apt install poppler-utils`
+   * *Mac*: `brew install poppler`
+   * *Windows*: Download binaries and add the `bin` folder to your System PATH.
+
+---
+
+
+
+## Installation & Running the App
+
+### 1. Setup Your Python Environment
+
+Clone the repository and install the necessary Python packages. Using a virtual environment is highly recommended.
 
 ```bash
-pip install flask flask-cors easyocr edge-tts pytesseract pillow requests
+# Clone the repository
+git clone [https://github.com/your-username/multilingual-tts.git](https://github.com/your-username/multilingual-tts.git)
+cd multilingual-tts
+
+# Create a virtual environment (optional)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies (using the exact versions in requirements.txt)
+pip install -r requirements.txt
 ```
 
-Install Tesseract with Gujarati and Odia language packs:
 
-```bash
-# Ubuntu / Debian
-sudo apt install tesseract-ocr tesseract-ocr-guj tesseract-ocr-ori
-```
+### 2. Start the Flask Server
 
-### 2. Set Up Sarvam AI API Key (required for Odia)
-
-Get a free API key at https://dashboard.sarvam.ai, then export it:
-
-```bash
-export SARVAM_API_KEY="your_key_here"
-```
-
-### 3. Run the App
+Run the application using Python. By default, the server will listen on port **5000**.
 
 ```bash
 python app.py
 ```
 
-Open http://localhost:5000 in your browser.
+
+### 3. Verify the Service
+
+Once the server is running, you can access the frontend at `http://127.0.0.1:5000` or interact directly with the API endpoints.
 
 ---
 
-## Web UI Features
 
-- Language selector (English, Hindi, Gujarati, Odia)
-- Drag-and-drop image upload with preview
-- Live processing status indicator
-- Extracted text display with copy button
-- In-browser audio playback
-- MP3 download
 
----
+## API Documentation
 
-## Project Structure
+The primary interaction with the system happens through the `/process` endpoint.
 
+### Process Document
+
+**Endpoint:** `POST /process`
+**Content-Type:** `multipart/form-data`
+
+| Parameter      | Type    | Required | Description                                                                          |
+| :------------- | :------ | :------- | :----------------------------------------------------------------------------------- |
+| `image`      | File    | Yes      | The Image (PNG, JPG, WEBP, BMP, TIFF) or PDF file.                                   |
+| `language`   | String  | Yes      | Language code:`en` (English), `hi` (Hindi), `gu` (Gujarati), or `od` (Odia). |
+| `start_page` | Integer | No       | The page number to start processing (PDF only). Default: 1.                          |
+| `end_page`   | Integer | No       | The page number to stop processing (PDF only).                                       |
+
+### Example Response (JSON)
+
+```json
+{
+  "text": "The extracted text content from the document...",
+  "audio_url": "/audio/550e8400-e29b-41d4-a716-446655440000.mp3",
+  "total_pages": 5,
+  "pages_processed": "1–5"
+}
 ```
-.
-├── app.py              # Flask backend — OCR + TTS pipeline
-└── templates/
-    └── index.html      # Frontend UI
-```
+
+
+### Serve Audio
+
+**Endpoint:** `GET /audio/<filename>`
+
+Used to retrieve the generated audio file for playback or download.
 
 ---
 
-## Environment Variables
 
-| Variable           | Description                      | Required       |
-| ------------------ | -------------------------------- | -------------- |
-| `SARVAM_API_KEY` | API key for Sarvam AI (Odia TTS) | Yes (for Odia) |
 
----
+## Future Scope & Conclusion
 
-## Supported Image Formats
+### Future Enhancements
 
-PNG, JPG, JPEG, WEBP, BMP, TIFF
+* **Expanded Language Support**: Adding more regional Indian languages such as Bengali, Tamil, and Telugu using specialized MMS or Tesseract models.
+* **Document Layout Analysis**: Implementing advanced pre-processing to handle complex layouts like tables, multi-column articles, and embedded charts.
+* **Mobile-First UI**: Developing a dedicated mobile application or a responsive React/Vue.js frontend for on-the-go document scanning.
+* **Cloud Scaling**: Containerizing the application using **Docker** to deploy on AWS or Google Cloud for better performance and scalability.
+
+### Conclusion
+
+This project successfully demonstrates a hybrid AI pipeline that bridges the gap between static documents and auditory accessibility. By intelligently switching between OCR and TTS engines based on the language and document type, it provides a seamless experience for converting visual information into natural, spoken words.
